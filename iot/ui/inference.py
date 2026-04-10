@@ -302,6 +302,14 @@ def _cumulants_2_to_4(signal: List[float]) -> Tuple[float, float, float]:
     return k2, k3, k4
 
 
+_BAR_TO_PA = 100_000.0          # 1 bar = 100 000 Pa
+_GAS_PRESS_NORM = 500_000.0     # normalisation divisor for pipe pressure (Pa)
+_LPS_TO_M3S = 0.001             # 1 L/s = 0.001 m³/s
+_GAS_FLOW_NORM = 0.3            # normalisation divisor for flow rate (m³/s)
+_GAS_TEMP_NORM = 100.0          # normalisation divisor for pipe temperature (°C)
+_GAS_SCORE_MAX = 1.5            # clip upper bound for signal score
+
+
 def _gas_signal_from_row(row: pd.Series) -> float:
     """Compute the normalised gas-signal score from a CSV row.
 
@@ -309,15 +317,15 @@ def _gas_signal_from_row(row: pd.Series) -> float:
     scaling as emergency_system._room_signal_updates_for_gas_leak which
     expects SI units (Pa, m³/s, K) coming from hardware packets.
     """
-    # press_pipe_bar: bar → Pa → score = Pa / 500000
-    press_score = float(row.get("press_pipe_bar", 0.0)) * 100000.0 / 500000.0
-    # flow_rate_lps: L/s → m³/s → score = m³/s / 0.3
-    flow_score = float(row.get("flow_rate_lps", 0.0)) * 0.001 / 0.3
-    # temp_pipe_c: °C (already Celsius) → score = C / 100
-    temp_score = float(row.get("temp_pipe_c", 0.0)) / 100.0
+    # press_pipe_bar: bar → Pa → score = Pa / _GAS_PRESS_NORM
+    press_score = float(row.get("press_pipe_bar", 0.0)) * _BAR_TO_PA / _GAS_PRESS_NORM
+    # flow_rate_lps: L/s → m³/s → score = m³/s / _GAS_FLOW_NORM
+    flow_score = float(row.get("flow_rate_lps", 0.0)) * _LPS_TO_M3S / _GAS_FLOW_NORM
+    # temp_pipe_c: °C → score = °C / _GAS_TEMP_NORM
+    temp_score = float(row.get("temp_pipe_c", 0.0)) / _GAS_TEMP_NORM
 
     score = max(press_score, flow_score, temp_score)
-    return max(0.0, min(1.5, score))
+    return max(0.0, min(_GAS_SCORE_MAX, score))
 
 
 def run_gas_test(
@@ -365,7 +373,10 @@ def run_gas_test(
         # Normalised confidence proxy (clipped to [0, 1])
         confidence = min(1.0, max(0.0, recent_mean))
 
-        pred = int(recent_mean >= _GAS_MEAN_THRESHOLD and cumulant_score >= _GAS_SCORE_THRESHOLD)
+        is_gas_detected = (
+            recent_mean >= _GAS_MEAN_THRESHOLD and cumulant_score >= _GAS_SCORE_THRESHOLD
+        )
+        pred = int(is_gas_detected)
         y_pred.append(pred)
         y_score.append(float(confidence))
 
